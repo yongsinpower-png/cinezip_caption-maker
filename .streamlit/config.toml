@@ -1,0 +1,3 @@
+# 업로드 최대 용량 (MB) — 기본 200MB에서 2GB로 확대
+[server]
+maxUploadSize = 2048
