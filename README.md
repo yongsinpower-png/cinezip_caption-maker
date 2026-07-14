@@ -1,3 +1,14 @@
+---
+title: 트래블디토 캡션 생성기
+emoji: ✈️
+colorFrom: red
+colorTo: blue
+sdk: streamlit
+sdk_version: "1.59.0"
+app_file: app.py
+pinned: false
+---
+
 # ✈️ 트래블디토 인스타 캡션 자동 생성기
 
 영상(파일 업로드 or 유튜브 링크)을 넣으면 → 대본을 추출하고 → 트래블디토 말투로
@@ -47,20 +58,31 @@ streamlit run app.py
 
 브라우저가 자동으로 열립니다 (http://localhost:8501).
 
-## 다른 컴퓨터에서도 쓰기 (무료 배포)
+## 다른 컴퓨터에서도 쓰기 (무료 배포 — Hugging Face Spaces)
 
-Streamlit Community Cloud에 올리면 어느 컴퓨터에서든 브라우저로 접속할 수 있습니다.
+GitHub 없이, 이메일 가입만으로 배포할 수 있습니다.
 
-1. 이 폴더를 GitHub 저장소로 올림 (**secrets.toml은 절대 올리지 말 것** — .gitignore에 포함됨)
-2. https://share.streamlit.io 접속 → GitHub 로그인 → New app → 저장소 선택, Main file: `app.py`
-3. 앱 Settings → Secrets에 API 키 붙여넣기:
-   ```toml
-   GOOGLE_API_KEY = "AIza..."
-   ```
-4. 발급된 `https://○○○.streamlit.app` 주소를 즐겨찾기 해두면 끝.
+1. https://huggingface.co/join 에서 가입 (이메일만 있으면 됨)
+2. https://huggingface.co/new-space 접속:
+   - Space name: 원하는 이름 (예: `travelditto-caption-generator`)
+   - SDK: **Streamlit** 선택
+   - Hardware: **CPU basic (Free)**
+   - Visibility: **Private** 권장
+   - "Create Space" 클릭
+3. 생성된 Space 화면의 **Files** 탭 → **Add file → Upload files**에서
+   이 폴더의 아래 파일들을 그대로 드래그 앤 드롭:
+   `app.py`, `pipeline.py`, `style_prompt.py`, `requirements.txt`,
+   `packages.txt`, `README.md`, `.streamlit/config.toml`
+   (`.streamlit/config.toml`은 업로드 화면에서 파일명 칸에
+   `.streamlit/config.toml`이라고 경로째로 입력하면 폴더가 자동으로 만들어집니다)
+   ⚠️ `.streamlit/secrets.toml`은 **올리지 마세요** (API 키 파일, 절대 업로드 금지)
+4. Space **Settings → Variables and secrets → New secret**에서 키 등록:
+   - Name: `GOOGLE_API_KEY` / Value: 본인의 구글 API 키
+5. 자동으로 빌드가 시작되고, 완료되면 `https://huggingface.co/spaces/내아이디/Space이름`
+   주소로 어디서든 접속할 수 있습니다.
 
-⚠️ 공개 URL이므로 사람들에게 오픈하기 전까지는 앱 Settings에서
-"Only specific people can view this app"으로 비공개 설정을 권장합니다.
+⚠️ 클라우드 배포 시 유튜브 오디오 다운로드(자막 없는 영상)는 유튜브 측 차단으로
+실패할 수 있습니다. 그 경우 영상 파일 업로드나 자막 있는 링크를 사용하세요.
 
 ⚠️ 클라우드 배포 시 유튜브 오디오 다운로드(자막 없는 영상)는 유튜브 측 차단으로
 실패할 수 있습니다. 그 경우 영상 파일 업로드나 자막 있는 링크를 사용하세요.
