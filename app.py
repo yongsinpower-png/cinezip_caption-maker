@@ -7,6 +7,16 @@
 import os
 import tempfile
 
+# 일부 클라우드 컨테이너는 로케일이 UTF-8이 아니라(C/POSIX/ASCII) 한글 처리 중
+# "'ascii' codec can't encode characters" 오류가 날 수 있어 앱 시작 시 강제 설정.
+import locale
+for _loc in ("C.UTF-8", "en_US.UTF-8"):
+    try:
+        locale.setlocale(locale.LC_ALL, _loc)
+        break
+    except locale.Error:
+        continue
+
 import streamlit as st
 import streamlit.components.v1 as components
 

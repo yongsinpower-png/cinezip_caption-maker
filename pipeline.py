@@ -348,7 +348,17 @@ def generate_caption_gemini(
     )
     caption = ""
     for _ in range(2):  # 간헐적 빈 응답이면 1회 재시도
-        resp = client.models.generate_content(model=model, contents=parts, config=config)
+        try:
+            resp = client.models.generate_content(model=model, contents=parts, config=config)
+        except UnicodeEncodeError:
+            # 일부 클라우드 환경에서 검색 그라운딩 결과(비ASCII URL 등) 처리 중
+            # 인코딩 오류가 나는 경우가 있어, 검색 없이 한 번 더 시도
+            if not config.tools:
+                raise
+            config = types.GenerateContentConfig(
+                system_instruction=style_prompt, max_output_tokens=8000,
+            )
+            resp = client.models.generate_content(model=model, contents=parts, config=config)
         caption = _gemini_text(resp)
         if caption:
             break
