@@ -25,8 +25,10 @@ def get_secret(name: str) -> str:
     except Exception:
         pass
     value = value or os.environ.get(name, "")
-    # secrets.toml의 자리표시자(한글 안내문)는 키로 취급하지 않음
-    return value if value.isascii() else ""
+    # secrets.toml의 자리표시자(한글 안내문)만 걸러내고, 그 외 값은 그대로 사용
+    if any("가" <= ch <= "힣" for ch in value):
+        return ""
+    return value
 
 
 with st.sidebar:
