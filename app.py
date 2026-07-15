@@ -214,9 +214,9 @@ if generate:
                     progress("오디오 추출 중...")
                     audio = pipeline.extract_audio(video_path, td)
                     transcript = stt(audio)
-                except Exception:
+                except Exception as e:
                     transcript = ""
-                    progress("음성 트랙이 없는 영상이에요.")
+                    progress(f"⚠️ 음성 인식 실패 ({type(e).__name__}: {str(e)[:200]}) — 화면 분석으로 전환합니다.")
 
                 # 목소리가 없거나 너무 짧으면 → 영상 화면 직접 분석 (Gemini)
                 if len(transcript.strip()) < 40:
@@ -269,8 +269,12 @@ if generate:
         st.session_state["frames"] = frames
 
     except Exception as e:
+        import traceback
         status.update(state="error")
-        fail(f"오류가 발생했습니다: {e}")
+        st.error(f"오류가 발생했습니다: {e}")
+        with st.expander("🔧 진단 정보 (오류 상세)"):
+            st.code(traceback.format_exc(), language="python")
+        st.stop()
 
 # ---------------------------------------------------------------- 결과 표시 (생성 후 계속 유지)
 

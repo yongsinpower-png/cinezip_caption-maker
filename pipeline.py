@@ -50,11 +50,11 @@ def get_duration_seconds(media_path: str) -> float:
 
 
 def extract_audio(video_path: str, out_dir: str) -> str:
-    """음성만 16kHz 모노 mp3(32kbps)로 추출 — 1시간에 약 14MB."""
+    """음성만 24kHz 모노 mp3(64kbps)로 추출 — 인식률을 위해 화질보다 음질 우선."""
     out = os.path.join(out_dir, "audio.mp3")
     _run([
         _ffmpeg(), "-y", "-i", video_path, "-vn",
-        "-ac", "1", "-ar", "16000", "-b:a", "32k", out,
+        "-ac", "1", "-ar", "24000", "-b:a", "64k", out,
     ])
     return out
 
@@ -207,8 +207,13 @@ def _caption_user_text(transcript: str, extra_info: str, caption_mode: str, has_
 # ---------------------------------------------------------------- Google Gemini (키 1개로 STT + 캡션)
 
 _TRANSCRIBE_PROMPT = (
-    "이 오디오/영상에서 사람이 말하는 내용을 원어 그대로 전부 받아써줘. "
-    "타임스탬프, 화자 표시, 설명 없이 발화 문장만 출력해."
+    "이 오디오/영상은 여행 브이로그야. 사람이 말하는 내용을 처음부터 끝까지 "
+    "빠짐없이, 최대한 정확하게 받아써줘.\n"
+    "- 들리는 발화를 있는 그대로 전사해. 의역하거나 요약하거나 문장을 생략하지 마.\n"
+    "- 배경 소음, 음악, 잘 안 들리는 구간이 있어도 문맥과 발음을 최대한 유추해서 "
+    "자연스러운 한국어 문장으로 채워 넣어. 완전히 불가능한 경우에만 [안 들림]으로 표시해.\n"
+    "- 지명, 음식 이름, 숫자(가격/시간 등)는 특히 정확하게 받아써줘.\n"
+    "- 타임스탬프, 화자 표시, 설명, 요약 없이 발화 문장만 순서대로 출력해."
 )
 
 
@@ -246,24 +251,36 @@ def gemini_video_content(
     model: str = "gemini-2.5-flash", progress=None,
 ) -> str:
     """목소리 없는 영상: Gemini가 화면을 직접 보고 자막·화면 텍스트·장면을 정리."""
+    from google.genai import types
+
     client = _gemini_client(google_api_key)
     if progress:
         progress("영상 화면을 Gemini가 직접 분석 중... (파일이 크면 몇 분 걸릴 수 있어요)")
     mime = _VIDEO_MIME.get(os.path.splitext(video_path)[1].lower(), "video/mp4")
     part = _gemini_media_part(client, video_path, mime)
-    resp = client.models.generate_content(
-        model=model,
-        contents=[
-            part,
-            "이 영상을 처음부터 끝까지 보고, 인스타그램 캡션 작성에 쓸 수 있도록 "
-            "내용을 자세히 정리해줘:\n"
-            "1) 화면에 나오는 자막/텍스트/멘트를 순서대로 전부 받아써줘 (가장 중요)\n"
-            "2) 음성 멘트가 있다면 그것도 받아써줘\n"
-            "3) 장면별로 어떤 장소/음식/활동을 보여주는지 구체적으로 설명해줘\n"
-            "다른 인사말 없이 정리 내용만 출력해.",
-        ],
+    prompt = (
+        "이 영상을 처음부터 끝까지 보고, 인스타그램 캡션 작성에 쓸 수 있도록 "
+        "내용을 자세히 정리해줘:\n"
+        "1) 화면에 나오는 자막/텍스트/멘트를 순서대로 전부 받아써줘 (가장 중요)\n"
+        "2) 음성 멘트가 있다면 그것도 최대한 정확하게 받아써줘. "
+        "잘 안 들리는 구간은 문맥으로 유추해서 채우고, 완전히 불가능할 때만 [안 들림]으로 표시해\n"
+        "3) 장면별로 어떤 장소/음식/활동을 보여주는지 구체적으로 설명해줘\n"
+        "다른 인사말 없이 정리 내용만 출력해."
     )
-    return _gemini_text(resp)
+    config = types.GenerateContentConfig(temperature=0.0)
+    try:
+        resp = client.models.generate_content(
+            model=model, contents=[part, prompt], config=config,
+        )
+    except UnicodeEncodeError:
+        # 검색/응답 처리 중 비ASCII 문자로 인한 오류 발생 시 안전 옵션으로 재시도
+        resp = client.models.generate_content(
+            model=model, contents=[part, prompt],
+        )
+    text = _gemini_text(resp)
+    if not text:
+        raise RuntimeError("영상 내용을 읽어오지 못했습니다.")
+    return text
 
 
 def transcribe_audio_gemini(
@@ -271,14 +288,20 @@ def transcribe_audio_gemini(
     model: str = "gemini-2.5-flash", progress=None,
 ) -> str:
     """Gemini로 오디오 전사 — Groq 없이 구글 키 하나로 해결."""
+    from google.genai import types
+
     client = _gemini_client(google_api_key)
     if progress:
         progress("Gemini로 음성 인식 중...")
     part = _gemini_media_part(client, audio_path, "audio/mpeg")
     resp = client.models.generate_content(
         model=model, contents=[part, _TRANSCRIBE_PROMPT],
+        config=types.GenerateContentConfig(temperature=0.0),
     )
-    return (resp.text or "").strip()
+    text = _gemini_text(resp)
+    if not text:
+        raise RuntimeError("음성 인식 결과가 비어 있습니다.")
+    return text
 
 
 def gemini_youtube_transcript(
