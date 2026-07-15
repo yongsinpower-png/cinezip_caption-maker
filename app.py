@@ -262,7 +262,7 @@ if generate:
                 frames=frames,
                 caption_mode=caption_mode,
             )
-        caption = pipeline.soft_wrap(caption)
+        caption = pipeline.strip_indentation(caption)
         status.update(label="완료! 🎉", state="complete", expanded=False)
         st.session_state["caption"] = caption
         st.session_state["transcript"] = transcript

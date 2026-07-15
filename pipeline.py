@@ -162,22 +162,9 @@ def download_youtube_audio(url: str, out_dir: str, progress=None) -> str:
 
 # ---------------------------------------------------------------- 캡션 후처리
 
-def soft_wrap(text: str, limit: int = 28, width: int = 22) -> str:
-    """휴대폰 화면 기준으로 긴 줄을 어절 단위로 줄바꿈 (해시태그 줄은 제외)."""
-    import textwrap
-
-    out = []
-    for line in text.splitlines():
-        if len(line) <= limit or line.lstrip().startswith("#"):
-            out.append(line)
-            continue
-        indent = line[: len(line) - len(line.lstrip())]
-        wrapped = textwrap.wrap(
-            line.strip(), width=width,
-            break_long_words=False, break_on_hyphens=False,
-        )
-        out.extend(indent + w for w in wrapped)
-    return "\n".join(out)
+def strip_indentation(text: str) -> str:
+    """AI가 번호 리스트 등에서 실수로 넣은 줄 앞 공백만 제거 (내용/줄바꿈 위치는 그대로)."""
+    return "\n".join(line.lstrip(" \t") for line in text.splitlines())
 
 # ---------------------------------------------------------------- 캡션 프롬프트 (공용)
 
