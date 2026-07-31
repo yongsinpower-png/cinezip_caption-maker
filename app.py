@@ -63,7 +63,7 @@ with st.sidebar:
             ["기본 (Gemini Flash) — 무료 사용량 큼", "고품질 (Gemini Pro)"],
             index=0,
         )
-        model = "gemini-2.5-flash" if model_label.startswith("기본") else "gemini-2.5-pro"
+        model = "gemini-flash-latest" if model_label.startswith("기본") else "gemini-pro-latest"
         use_web_search = st.checkbox(
             "🔍 웹 검색으로 정보 보강 (권장)", value=True,
             help="가격·예약처·준비물 같은 실전 정보를 구글 검색으로 조사해서 캡션에 반영합니다.",
@@ -168,7 +168,7 @@ if generate:
     def stt(audio_path):
         """엔진에 맞는 음성 인식."""
         if use_gemini:
-            return pipeline.transcribe_audio_gemini(audio_path, google_key, model="gemini-2.5-flash", progress=progress)
+            return pipeline.transcribe_audio_gemini(audio_path, google_key, model="gemini-flash-latest", progress=progress)
         return pipeline.transcribe_audio(audio_path, groq_key, progress)
 
     try:

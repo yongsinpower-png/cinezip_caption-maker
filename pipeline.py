@@ -235,7 +235,7 @@ _VIDEO_MIME = {
 
 def gemini_video_content(
     video_path: str, google_api_key: str,
-    model: str = "gemini-2.5-flash", progress=None,
+    model: str = "gemini-flash-latest", progress=None,
 ) -> str:
     """목소리 없는 영상: Gemini가 화면을 직접 보고 자막·화면 텍스트·장면을 정리."""
     from google.genai import types
@@ -272,7 +272,7 @@ def gemini_video_content(
 
 def transcribe_audio_gemini(
     audio_path: str, google_api_key: str,
-    model: str = "gemini-2.5-flash", progress=None,
+    model: str = "gemini-flash-latest", progress=None,
 ) -> str:
     """Gemini로 오디오 전사 — Groq 없이 구글 키 하나로 해결."""
     from google.genai import types
@@ -292,7 +292,7 @@ def transcribe_audio_gemini(
 
 
 def gemini_youtube_transcript(
-    url: str, google_api_key: str, model: str = "gemini-2.5-flash",
+    url: str, google_api_key: str, model: str = "gemini-flash-latest",
 ) -> str:
     """자막 없는 공개 유튜브 영상: Gemini가 URL을 직접 보고 받아쓰기 (다운로드 불필요)."""
     from google.genai import types
@@ -326,7 +326,7 @@ def generate_caption_gemini(
     transcript: str,
     style_prompt: str,
     google_api_key: str,
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-flash-latest",
     extra_info: str = "",
     frames: list | None = None,
     caption_mode: str = "영상 내용 요약",
@@ -351,13 +351,19 @@ def generate_caption_gemini(
         for jpg in (frames or [])
     ]
     parts.append(user_text)
-    config = types.GenerateContentConfig(
-        system_instruction=style_prompt,
-        max_output_tokens=8000,
-        tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
-    )
+
+    def make_config(with_search: bool) -> "types.GenerateContentConfig":
+        return types.GenerateContentConfig(
+            system_instruction=style_prompt,
+            max_output_tokens=16000,
+            # 생각(thinking) 토큰이 출력 예산을 다 먹어 빈 응답이 나오는 걸 방지
+            thinking_config=types.ThinkingConfig(thinking_budget=4096),
+            tools=[types.Tool(google_search=types.GoogleSearch())] if with_search else None,
+        )
+
+    config = make_config(use_search)
     caption = ""
-    for _ in range(2):  # 간헐적 빈 응답이면 1회 재시도
+    for attempt in range(3):  # 간헐적 빈 응답 대비 재시도
         try:
             resp = client.models.generate_content(model=model, contents=parts, config=config)
         except UnicodeEncodeError:
@@ -365,9 +371,7 @@ def generate_caption_gemini(
             # 인코딩 오류가 나는 경우가 있어, 검색 없이 한 번 더 시도
             if not config.tools:
                 raise
-            config = types.GenerateContentConfig(
-                system_instruction=style_prompt, max_output_tokens=8000,
-            )
+            config = make_config(with_search=False)
             resp = client.models.generate_content(model=model, contents=parts, config=config)
         caption = _gemini_text(resp)
         if caption:
