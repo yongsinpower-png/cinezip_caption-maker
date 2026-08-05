@@ -1,0 +1,17 @@
+name: Keep Streamlit app awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping app health endpoint
+        run: |
+          curl -sS -o /dev/null -w "health: %{http_code}\n" \
+            "https://cinezipcaption-maker-1.streamlit.app/~/+/_stcore/health" || true
+          curl -sS -o /dev/null -w "root:   %{http_code}\n" \
+            "https://cinezipcaption-maker-1.streamlit.app/" || true
