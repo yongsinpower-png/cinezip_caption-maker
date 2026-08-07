@@ -1,17 +1,25 @@
 name: Keep Streamlit app awake
 
+# GitHub는 짧은 간격(예: 10분)의 schedule 트리거를 활동이 적은 저장소에서
+# 자주 미루거나 뭉개버린다. 대신 트리거는 4시간마다(비교적 잘 지켜지는 굵은
+# 간격)로 걸고, 한 번 시작된 job이 자체적으로 최대 6시간 동안 4분마다
+# 반복 핑을 보내도록 해서 트리거가 다소 늦어져도 빈틈없이 커버한다.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "0 */4 * * *"
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 355
     steps:
-      - name: Ping app health endpoint
+      - name: Ping repeatedly for ~5h50m
         run: |
-          curl -sS -o /dev/null -w "health: %{http_code}\n" \
-            "https://cinezipcaption-maker-1.streamlit.app/~/+/_stcore/health" || true
-          curl -sS -o /dev/null -w "root:   %{http_code}\n" \
-            "https://cinezipcaption-maker-1.streamlit.app/" || true
+          URL="https://cinezipcaption-maker-1.streamlit.app/~/+/_stcore/health"
+          END=$((SECONDS + 350 * 60))
+          while [ $SECONDS -lt $END ]; do
+            CODE=$(curl -sS -o /dev/null -w "%{http_code}" "$URL" || echo "fail")
+            echo "$(date -u +%FT%TZ) -> $CODE"
+            sleep 240
+          done
