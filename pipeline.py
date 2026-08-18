@@ -168,7 +168,10 @@ def strip_indentation(text: str) -> str:
 
 # ---------------------------------------------------------------- 캡션 프롬프트 (공용)
 
-def _caption_user_text(transcript: str, extra_info: str, caption_mode: str, has_frames: bool) -> str:
+def _caption_user_text(
+    transcript: str, extra_info: str, caption_mode: str, has_frames: bool,
+    guideline: str = "", has_guideline_files: bool = False,
+) -> str:
     # 대본이 아주 길면 앞뒤 위주로 절약 (비용 + 집중도)
     if len(transcript) > 24000:
         transcript = transcript[:16000] + "\n...(중략)...\n" + transcript[-8000:]
@@ -182,11 +185,25 @@ def _caption_user_text(transcript: str, extra_info: str, caption_mode: str, has_
     )
 
     text = f"# 작성 방향\n{mode_note}\n\n# 영상 대본\n{transcript}"
+    if guideline.strip() or has_guideline_files:
+        text += (
+            "\n\n# 원고/가이드라인 (최우선 순위 — 절대 누락 금지)\n"
+            "아래는 클라이언트나 브랜드에서 받은 실제 원고 또는 가이드라인이다 "
+            "(텍스트 그리고/또는 첨부된 이미지·PDF 파일).\n"
+            "이 안에 담긴 정보, 문구, 지시사항을 하나도 빠짐없이 전부 파악해서, "
+            "트래블디토의 말투와 위 영상 대본의 정보를 더해 하나의 완성된 캡션으로 "
+            "재구성해줘. 가이드라인에 있는 내용 중 단 하나라도 누락되면 실패작이다. "
+            "가이드라인과 영상 대본 내용이 겹치면 가이드라인 쪽 표현/사실을 우선해라."
+        )
+        if guideline.strip():
+            text += f"\n\n[가이드라인 텍스트]\n{guideline.strip()}"
+        if has_guideline_files:
+            text += "\n\n[첨부된 가이드라인 파일도 함께 읽고 반영해라 — 아래 이미지/PDF 첨부 참고]"
     if extra_info.strip():
         text += f"\n\n# 추가 정보/요청사항 (반영 필수)\n{extra_info.strip()}"
     if has_frames:
         text += (
-            "\n\n# 첨부 이미지\n영상에서 뽑은 장면들이야. "
+            "\n\n# 첨부 이미지 (영상 장면)\n영상에서 뽑은 장면들이야. "
             "화면에 보이는 분위기/비주얼 정보를 캡션에 자연스럽게 반영해줘."
         )
     return text
@@ -331,11 +348,17 @@ def generate_caption_gemini(
     frames: list | None = None,
     caption_mode: str = "영상 내용 요약",
     use_search: bool = True,
+    guideline: str = "",
+    guideline_files: list | None = None,
 ) -> str:
+    """guideline_files: [(bytes, mime_type), ...] — 원고/가이드라인 이미지·PDF."""
     from google.genai import types
 
     client = _gemini_client(google_api_key)
-    user_text = _caption_user_text(transcript, extra_info, caption_mode, bool(frames))
+    user_text = _caption_user_text(
+        transcript, extra_info, caption_mode, bool(frames),
+        guideline=guideline, has_guideline_files=bool(guideline_files),
+    )
     if use_search:
         user_text += (
             "\n\n# 웹 검색 보강 (필수)\n"
@@ -347,6 +370,10 @@ def generate_caption_gemini(
         )
 
     parts = [
+        types.Part.from_bytes(data=data, mime_type=mime)
+        for data, mime in (guideline_files or [])
+    ]
+    parts += [
         types.Part.from_bytes(data=jpg, mime_type="image/jpeg")
         for jpg in (frames or [])
     ]
@@ -390,13 +417,36 @@ def generate_caption(
     extra_info: str = "",
     frames: list | None = None,
     caption_mode: str = "영상 내용 요약",
+    guideline: str = "",
+    guideline_files: list | None = None,
 ) -> str:
+    """guideline_files: [(bytes, mime_type), ...] — 원고/가이드라인 이미지·PDF."""
     import anthropic
 
     client = anthropic.Anthropic(api_key=anthropic_api_key)
-    user_text = _caption_user_text(transcript, extra_info, caption_mode, bool(frames))
+    user_text = _caption_user_text(
+        transcript, extra_info, caption_mode, bool(frames),
+        guideline=guideline, has_guideline_files=bool(guideline_files),
+    )
 
     content = []
+    for data, mime in (guideline_files or []):
+        if mime == "application/pdf":
+            content.append({
+                "type": "document",
+                "source": {
+                    "type": "base64", "media_type": mime,
+                    "data": base64.standard_b64encode(data).decode(),
+                },
+            })
+        else:
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64", "media_type": mime,
+                    "data": base64.standard_b64encode(data).decode(),
+                },
+            })
     for jpg in (frames or []):
         content.append({
             "type": "image",

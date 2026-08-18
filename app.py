@@ -139,10 +139,30 @@ with tab_text:
     if manual_text.strip():
         source = ("text", manual_text.strip())
 
-extra_info = st.text_input(
+extra_info = st.text_area(
     "➕ 추가 요청사항 (선택)",
+    height=80,
     placeholder="예: 식당 이름은 '○○식당', 위치 강조해줘 / 라오스 환율 정보 넣어줘",
 )
+
+with st.expander("📋 원고/가이드라인 붙여넣기 (선택)"):
+    st.caption(
+        "클라이언트나 브랜드에서 받은 원고·가이드라인이 있다면 여기에 붙여넣거나 "
+        "파일로 첨부해 주세요. **안의 내용은 하나도 빠짐없이 전부 반영**해서, "
+        "트래블디토의 말투로 정리해 드립니다."
+    )
+    guideline_text = st.text_area(
+        "원고/가이드라인 텍스트",
+        height=220,
+        placeholder="원고나 가이드라인 텍스트를 그대로 붙여넣으세요.",
+        label_visibility="collapsed",
+    )
+    guideline_uploads = st.file_uploader(
+        "가이드라인 파일 (이미지/PDF, 여러 개 가능)",
+        type=["jpg", "jpeg", "png", "pdf"],
+        accept_multiple_files=True,
+        help="스크린샷, 스캔본, PDF 문서도 읽어서 반영합니다.",
+    )
 
 generate = st.button("🚀 캡션 생성하기", type="primary", use_container_width=True)
 
@@ -164,6 +184,7 @@ if generate:
     status = st.status("작업 중...", expanded=True)
     progress = lambda msg: status.write(msg)
     transcript, frames = "", None
+    guideline_files = [(f.getvalue(), f.type) for f in (guideline_uploads or [])]
 
     def stt(audio_path):
         """엔진에 맞는 음성 인식."""
@@ -240,6 +261,8 @@ if generate:
             status.update(state="error")
             fail("대본을 추출하지 못했습니다. 다른 영상으로 시도해 보세요.")
 
+        if guideline_files:
+            progress(f"📋 가이드라인 파일 {len(guideline_files)}개 반영 중...")
         progress("트래블디토 말투로 캡션 작성 중... ✍️")
         if use_gemini:
             caption = pipeline.generate_caption_gemini(
@@ -251,6 +274,8 @@ if generate:
                 frames=frames,
                 caption_mode=caption_mode,
                 use_search=use_web_search,
+                guideline=guideline_text,
+                guideline_files=guideline_files,
             )
         else:
             caption = pipeline.generate_caption(
@@ -261,6 +286,8 @@ if generate:
                 extra_info=extra_info,
                 frames=frames,
                 caption_mode=caption_mode,
+                guideline=guideline_text,
+                guideline_files=guideline_files,
             )
         caption = pipeline.strip_indentation(caption)
         status.update(label="완료! 🎉", state="complete", expanded=False)
