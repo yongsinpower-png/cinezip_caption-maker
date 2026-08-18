@@ -176,24 +176,35 @@ def _caption_user_text(
     if len(transcript) > 24000:
         transcript = transcript[:16000] + "\n...(중략)...\n" + transcript[-8000:]
 
-    mode_note = (
-        "영상 대본의 핵심 내용을 캡션으로 요약해줘."
-        if caption_mode == "영상 내용 요약"
-        else "영상 주제를 먼저 파악한 뒤, 같은 맥락에서 시청자가 꼭 알아야 할 "
-             "추가 정보와 실전 팁 중심으로 캡션을 구성해줘. "
-             "(대본 반복이 아니라 '저장할 가치가 있는 보너스 정보' 느낌으로)"
-    )
+    has_guideline = bool(guideline.strip()) or has_guideline_files
+    has_transcript = bool(transcript.strip())
 
-    text = f"# 작성 방향\n{mode_note}\n\n# 영상 대본\n{transcript}"
-    if guideline.strip() or has_guideline_files:
+    if has_transcript:
+        mode_note = (
+            "영상 대본의 핵심 내용을 캡션으로 요약해줘."
+            if caption_mode == "영상 내용 요약"
+            else "영상 주제를 먼저 파악한 뒤, 같은 맥락에서 시청자가 꼭 알아야 할 "
+                 "추가 정보와 실전 팁 중심으로 캡션을 구성해줘. "
+                 "(대본 반복이 아니라 '저장할 가치가 있는 보너스 정보' 느낌으로)"
+        )
+        text = f"# 작성 방향\n{mode_note}\n\n# 영상 대본\n{transcript}"
+    else:
+        # 영상 없이 원고/가이드라인만으로 캡션을 작성하는 경우
+        text = (
+            "# 작성 방향\n영상 대본은 없다. 아래 원고/가이드라인만을 근거로 "
+            "트래블디토의 말투로 완성된 인스타그램 캡션을 작성해줘."
+        )
+
+    if has_guideline:
         text += (
             "\n\n# 원고/가이드라인 (최우선 순위 — 절대 누락 금지)\n"
             "아래는 클라이언트나 브랜드에서 받은 실제 원고 또는 가이드라인이다 "
             "(텍스트 그리고/또는 첨부된 이미지·PDF 파일).\n"
             "이 안에 담긴 정보, 문구, 지시사항을 하나도 빠짐없이 전부 파악해서, "
-            "트래블디토의 말투와 위 영상 대본의 정보를 더해 하나의 완성된 캡션으로 "
-            "재구성해줘. 가이드라인에 있는 내용 중 단 하나라도 누락되면 실패작이다. "
-            "가이드라인과 영상 대본 내용이 겹치면 가이드라인 쪽 표현/사실을 우선해라."
+            "트래블디토의 말투로 재구성해줘"
+            + (". 영상 대본의 정보도 함께 반영하되, " if has_transcript else ". ")
+            + "가이드라인에 있는 내용 중 단 하나라도 누락되면 실패작이다."
+            + (" 가이드라인과 영상 대본 내용이 겹치면 가이드라인 쪽 표현/사실을 우선해라." if has_transcript else "")
         )
         if guideline.strip():
             text += f"\n\n[가이드라인 텍스트]\n{guideline.strip()}"

@@ -174,8 +174,11 @@ def fail(msg: str):
 
 
 if generate:
-    if source is None:
-        fail("영상 파일, 유튜브 링크, 대본 중 하나를 먼저 넣어주세요!")
+    guideline_files = [(f.getvalue(), f.type) for f in (guideline_uploads or [])]
+    has_guideline = bool(guideline_text.strip()) or bool(guideline_files)
+
+    if source is None and not has_guideline:
+        fail("영상 파일, 유튜브 링크, 대본, 원고/가이드라인 중 하나는 먼저 넣어주세요!")
     if use_gemini and not google_key:
         fail("사이드바에 Google API 키를 입력해 주세요. (aistudio.google.com/apikey 에서 무료 발급)")
     if not use_gemini and not anthropic_key:
@@ -184,7 +187,6 @@ if generate:
     status = st.status("작업 중...", expanded=True)
     progress = lambda msg: status.write(msg)
     transcript, frames = "", None
-    guideline_files = [(f.getvalue(), f.type) for f in (guideline_uploads or [])]
 
     def stt(audio_path):
         """엔진에 맞는 음성 인식."""
@@ -193,9 +195,12 @@ if generate:
         return pipeline.transcribe_audio(audio_path, groq_key, progress)
 
     try:
-        kind, value = source
+        kind, value = source if source else (None, None)
 
-        if kind == "text":
+        if kind is None:
+            progress("📋 원고/가이드라인만으로 캡션을 작성합니다.")
+
+        elif kind == "text":
             transcript = value
 
         elif kind == "youtube":
@@ -257,7 +262,7 @@ if generate:
                     except Exception:
                         progress("⚠️ 키프레임 추출에 실패해 대본만으로 진행합니다.")
 
-        if not transcript.strip():
+        if not transcript.strip() and not has_guideline:
             status.update(state="error")
             fail("대본을 추출하지 못했습니다. 다른 영상으로 시도해 보세요.")
 
