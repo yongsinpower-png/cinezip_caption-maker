@@ -237,7 +237,56 @@ def _gemini_client(api_key: str):
     return genai.Client(api_key=api_key)
 
 
-def _gemini_media_part(client, media_path: str, mime_type: str):
+def _with_gemini_retry(fn, progress=None, max_attempts=4):
+    """Gemini 서버가 일시적으로 과부하(503)일 때 지수 백오프로 자동 재시도."""
+    import time
+    from google.genai import errors as genai_errors
+
+    delay = 3
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except genai_errors.ServerError:
+            if attempt == max_attempts - 1:
+                raise
+            if progress:
+                progress(
+                    f"⏳ Google 서버가 일시적으로 혼잡합니다. "
+                    f"{delay}초 후 다시 시도합니다... ({attempt + 1}/{max_attempts})"
+                )
+            time.sleep(delay)
+            delay = min(delay * 2, 20)
+
+
+# "-latest" 별칭 모델이 트래픽 급증으로 계속 과부하일 때 전환할 안정적인 구버전 모델
+_MODEL_FALLBACK = {
+    "gemini-flash-latest": "gemini-2.5-flash",
+    "gemini-pro-latest": "gemini-2.5-pro",
+}
+
+
+def _generate_content_resilient(client, model, contents, config=None, progress=None):
+    """지수 백오프 재시도 후에도 계속 과부하(503)면, 안정적인 구버전 모델로 한 번 더 시도."""
+    from google.genai import errors as genai_errors
+
+    def call(m):
+        kwargs = {"model": m, "contents": contents}
+        if config is not None:
+            kwargs["config"] = config
+        return client.models.generate_content(**kwargs)
+
+    try:
+        return _with_gemini_retry(lambda: call(model), progress=progress)
+    except genai_errors.ServerError:
+        fallback = _MODEL_FALLBACK.get(model)
+        if not fallback:
+            raise
+        if progress:
+            progress(f"⚠️ {model} 모델이 계속 혼잡해서 안정적인 {fallback} 모델로 전환합니다...")
+        return _with_gemini_retry(lambda: call(fallback), progress=progress, max_attempts=2)
+
+
+def _gemini_media_part(client, media_path: str, mime_type: str, progress=None):
     """19MB 미만이면 인라인, 크면 File API 업로드 후 처리 대기."""
     import time
     from google.genai import types
@@ -245,7 +294,10 @@ def _gemini_media_part(client, media_path: str, mime_type: str):
     if os.path.getsize(media_path) < 19_000_000:
         with open(media_path, "rb") as f:
             return types.Part.from_bytes(data=f.read(), mime_type=mime_type)
-    uploaded = client.files.upload(file=media_path, config={"mime_type": mime_type})
+    uploaded = _with_gemini_retry(
+        lambda: client.files.upload(file=media_path, config={"mime_type": mime_type}),
+        progress=progress,
+    )
     for _ in range(300):
         state = getattr(getattr(uploaded, "state", None), "name", "ACTIVE")
         if state != "PROCESSING":
@@ -272,7 +324,7 @@ def gemini_video_content(
     if progress:
         progress("영상 화면을 Gemini가 직접 분석 중... (파일이 크면 몇 분 걸릴 수 있어요)")
     mime = _VIDEO_MIME.get(os.path.splitext(video_path)[1].lower(), "video/mp4")
-    part = _gemini_media_part(client, video_path, mime)
+    part = _gemini_media_part(client, video_path, mime, progress=progress)
     prompt = (
         "이 영상을 처음부터 끝까지 보고, 인스타그램 캡션 작성에 쓸 수 있도록 "
         "내용을 자세히 정리해줘:\n"
@@ -284,14 +336,12 @@ def gemini_video_content(
     )
     config = types.GenerateContentConfig(temperature=0.0)
     try:
-        resp = client.models.generate_content(
-            model=model, contents=[part, prompt], config=config,
+        resp = _generate_content_resilient(
+            client, model, [part, prompt], config=config, progress=progress,
         )
     except UnicodeEncodeError:
         # 검색/응답 처리 중 비ASCII 문자로 인한 오류 발생 시 안전 옵션으로 재시도
-        resp = client.models.generate_content(
-            model=model, contents=[part, prompt],
-        )
+        resp = _generate_content_resilient(client, model, [part, prompt], progress=progress)
     text = _gemini_text(resp)
     if not text:
         raise RuntimeError("영상 내용을 읽어오지 못했습니다.")
@@ -308,10 +358,10 @@ def transcribe_audio_gemini(
     client = _gemini_client(google_api_key)
     if progress:
         progress("Gemini로 음성 인식 중...")
-    part = _gemini_media_part(client, audio_path, "audio/mpeg")
-    resp = client.models.generate_content(
-        model=model, contents=[part, _TRANSCRIBE_PROMPT],
-        config=types.GenerateContentConfig(temperature=0.0),
+    part = _gemini_media_part(client, audio_path, "audio/mpeg", progress=progress)
+    resp = _generate_content_resilient(
+        client, model, [part, _TRANSCRIBE_PROMPT],
+        config=types.GenerateContentConfig(temperature=0.0), progress=progress,
     )
     text = _gemini_text(resp)
     if not text:
@@ -320,16 +370,14 @@ def transcribe_audio_gemini(
 
 
 def gemini_youtube_transcript(
-    url: str, google_api_key: str, model: str = "gemini-flash-latest",
+    url: str, google_api_key: str, model: str = "gemini-flash-latest", progress=None,
 ) -> str:
     """자막 없는 공개 유튜브 영상: Gemini가 URL을 직접 보고 받아쓰기 (다운로드 불필요)."""
     from google.genai import types
 
     client = _gemini_client(google_api_key)
     part = types.Part(file_data=types.FileData(file_uri=url))
-    resp = client.models.generate_content(
-        model=model, contents=[part, _TRANSCRIBE_PROMPT],
-    )
+    resp = _generate_content_resilient(client, model, [part, _TRANSCRIBE_PROMPT], progress=progress)
     text = (resp.text or "").strip()
     if not text:
         raise RuntimeError("Gemini가 영상 내용을 읽지 못했습니다.")
@@ -361,6 +409,7 @@ def generate_caption_gemini(
     use_search: bool = True,
     guideline: str = "",
     guideline_files: list | None = None,
+    progress=None,
 ) -> str:
     """guideline_files: [(bytes, mime_type), ...] — 원고/가이드라인 이미지·PDF."""
     from google.genai import types
@@ -403,14 +452,14 @@ def generate_caption_gemini(
     caption = ""
     for attempt in range(3):  # 간헐적 빈 응답 대비 재시도
         try:
-            resp = client.models.generate_content(model=model, contents=parts, config=config)
+            resp = _generate_content_resilient(client, model, parts, config=config, progress=progress)
         except UnicodeEncodeError:
             # 일부 클라우드 환경에서 검색 그라운딩 결과(비ASCII URL 등) 처리 중
             # 인코딩 오류가 나는 경우가 있어, 검색 없이 한 번 더 시도
             if not config.tools:
                 raise
             config = make_config(with_search=False)
-            resp = client.models.generate_content(model=model, contents=parts, config=config)
+            resp = _generate_content_resilient(client, model, parts, config=config, progress=progress)
         caption = _gemini_text(resp)
         if caption:
             break

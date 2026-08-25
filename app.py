@@ -213,7 +213,7 @@ if generate:
                 if use_gemini:
                     try:
                         progress("Gemini가 유튜브 영상을 직접 분석 중...")
-                        transcript = pipeline.gemini_youtube_transcript(value, google_key)
+                        transcript = pipeline.gemini_youtube_transcript(value, google_key, progress=progress)
                     except Exception:
                         progress("직접 분석 실패 — 오디오를 내려받아 다시 시도합니다.")
                         with tempfile.TemporaryDirectory() as td:
@@ -281,6 +281,7 @@ if generate:
                 use_search=use_web_search,
                 guideline=guideline_text,
                 guideline_files=guideline_files,
+                progress=progress,
             )
         else:
             caption = pipeline.generate_caption(
