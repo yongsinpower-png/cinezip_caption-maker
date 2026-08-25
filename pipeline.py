@@ -264,7 +264,8 @@ def _with_gemini_retry(fn, progress=None, max_attempts=4):
 # "-latest" 별칭 모델이 트래픽 급증으로 계속 과부하일 때 전환할 안정적인 구버전 모델
 _MODEL_FALLBACK = {
     "gemini-flash-latest": "gemini-2.5-flash",
-    "gemini-pro-latest": "gemini-2.5-pro",
+    # gemini-2.5-pro는 구글이 제거함(404) — 존재하는 안정 모델로 대체
+    "gemini-pro-latest": "gemini-2.5-flash",
 }
 
 
