@@ -234,24 +234,27 @@ _TRANSCRIBE_PROMPT = (
 
 def _gemini_client(api_key: str):
     from google import genai
-    return genai.Client(api_key=api_key)
+    from google.genai import types
+    # 네트워크가 응답 없이 무한정 멈추는 것을 방지 (요청당 최대 3분)
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=180_000))
 
 
 def _with_gemini_retry(fn, progress=None, max_attempts=4):
-    """Gemini 서버가 일시적으로 과부하(503)일 때 지수 백오프로 자동 재시도."""
+    """Gemini 서버 과부하(503)나 네트워크 타임아웃 시 지수 백오프로 자동 재시도."""
     import time
+    import httpx
     from google.genai import errors as genai_errors
 
     delay = 3
     for attempt in range(max_attempts):
         try:
             return fn()
-        except genai_errors.ServerError:
+        except (genai_errors.ServerError, httpx.HTTPError):
             if attempt == max_attempts - 1:
                 raise
             if progress:
                 progress(
-                    f"⏳ Google 서버가 일시적으로 혼잡합니다. "
+                    f"⏳ Google 서버가 일시적으로 혼잡합니다(또는 네트워크 지연). "
                     f"{delay}초 후 다시 시도합니다... ({attempt + 1}/{max_attempts})"
                 )
             time.sleep(delay)
@@ -266,7 +269,8 @@ _MODEL_FALLBACK = {
 
 
 def _generate_content_resilient(client, model, contents, config=None, progress=None):
-    """지수 백오프 재시도 후에도 계속 과부하(503)면, 안정적인 구버전 모델로 한 번 더 시도."""
+    """지수 백오프 재시도 후에도 계속 과부하/타임아웃이면, 안정적인 구버전 모델로 한 번 더 시도."""
+    import httpx
     from google.genai import errors as genai_errors
 
     def call(m):
@@ -277,7 +281,7 @@ def _generate_content_resilient(client, model, contents, config=None, progress=N
 
     try:
         return _with_gemini_retry(lambda: call(model), progress=progress)
-    except genai_errors.ServerError:
+    except (genai_errors.ServerError, httpx.HTTPError):
         fallback = _MODEL_FALLBACK.get(model)
         if not fallback:
             raise
@@ -294,15 +298,30 @@ def _gemini_media_part(client, media_path: str, mime_type: str, progress=None):
     if os.path.getsize(media_path) < 19_000_000:
         with open(media_path, "rb") as f:
             return types.Part.from_bytes(data=f.read(), mime_type=mime_type)
+
+    size_mb = os.path.getsize(media_path) / 1_000_000
+    if progress:
+        progress(f"📤 파일 업로드 중... ({size_mb:.0f}MB — 크기에 따라 몇 분 걸릴 수 있어요)")
     uploaded = _with_gemini_retry(
         lambda: client.files.upload(file=media_path, config={"mime_type": mime_type}),
         progress=progress,
     )
-    for _ in range(300):
+
+    max_wait_sec = 300  # 최대 5분 — 그 이상은 조용히 무한 대기하지 않고 명확한 오류로 알림
+    elapsed = 0
+    while True:
         state = getattr(getattr(uploaded, "state", None), "name", "ACTIVE")
         if state != "PROCESSING":
             break
+        if elapsed >= max_wait_sec:
+            raise RuntimeError(
+                "구글 서버에서 파일 처리가 5분 넘게 끝나지 않습니다. "
+                "파일 용량을 줄이거나 잠시 후 다시 시도해 주세요."
+            )
+        if progress and elapsed % 10 == 0:
+            progress(f"⏳ 구글 서버에서 파일 처리 중... ({elapsed}초 경과)")
         time.sleep(2)
+        elapsed += 2
         uploaded = client.files.get(name=uploaded.name)
     return uploaded
 
