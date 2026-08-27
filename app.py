@@ -194,10 +194,23 @@ if generate:
             return pipeline.transcribe_audio_gemini(audio_path, google_key, model="gemini-flash-latest", progress=progress)
         return pipeline.transcribe_audio(audio_path, groq_key, progress)
 
+    # 같은 영상으로 다시 생성할 때 전사(대본 추출)를 반복하지 않도록 캐시
+    transcript_cache = st.session_state.setdefault("transcript_cache", {})
+
     try:
         kind, value = source if source else (None, None)
 
-        if kind is None:
+        src_key = None
+        if kind == "youtube":
+            src_key = ("youtube", value)
+        elif kind == "file":
+            src_key = ("file", value.name, value.size)
+
+        if src_key and src_key in transcript_cache:
+            transcript = transcript_cache[src_key]
+            progress("♻️ 이전에 추출해 둔 대본을 재사용합니다 — 바로 캡션 작성으로 넘어가요!")
+
+        elif kind is None:
             progress("📋 원고/가이드라인만으로 캡션을 작성합니다.")
 
         elif kind == "text":
@@ -261,6 +274,9 @@ if generate:
                         frames = pipeline.extract_frames(video_path, td)
                     except Exception:
                         progress("⚠️ 키프레임 추출에 실패해 대본만으로 진행합니다.")
+
+        if src_key and transcript.strip():
+            transcript_cache[src_key] = transcript
 
         if not transcript.strip() and not has_guideline:
             status.update(state="error")

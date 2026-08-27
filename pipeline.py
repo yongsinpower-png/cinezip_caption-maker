@@ -372,7 +372,10 @@ def gemini_video_content(
         "3) 장면별로 어떤 장소/음식/활동을 보여주는지 구체적으로 설명해줘\n"
         "다른 인사말 없이 정리 내용만 출력해."
     )
-    config = types.GenerateContentConfig(temperature=0.0)
+    config = types.GenerateContentConfig(
+        temperature=0.0, max_output_tokens=32768,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    )
     try:
         resp = _generate_content_resilient(
             client, model, [part, prompt], config=config, progress=progress,
@@ -397,9 +400,15 @@ def transcribe_audio_gemini(
     if progress:
         progress("Gemini로 음성 인식 중...")
     part = _gemini_media_part(client, audio_path, "audio/mpeg", progress=progress)
+    # 받아쓰기에는 사고(thinking) 과정이 불필요 → 꺼서 속도 대폭 향상.
+    # 긴 영상 대본이 잘리지 않도록 출력 한도도 넉넉히 확보.
     resp = _generate_content_resilient(
         client, model, [part, _TRANSCRIBE_PROMPT],
-        config=types.GenerateContentConfig(temperature=0.0), progress=progress,
+        config=types.GenerateContentConfig(
+            temperature=0.0, max_output_tokens=32768,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        ),
+        progress=progress,
     )
     text = _gemini_text(resp)
     if not text:
@@ -415,7 +424,14 @@ def gemini_youtube_transcript(
 
     client = _gemini_client(google_api_key)
     part = types.Part(file_data=types.FileData(file_uri=url))
-    resp = _generate_content_resilient(client, model, [part, _TRANSCRIBE_PROMPT], progress=progress)
+    resp = _generate_content_resilient(
+        client, model, [part, _TRANSCRIBE_PROMPT],
+        config=types.GenerateContentConfig(
+            temperature=0.0, max_output_tokens=32768,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        ),
+        progress=progress,
+    )
     text = (resp.text or "").strip()
     if not text:
         raise RuntimeError("Gemini가 영상 내용을 읽지 못했습니다.")
