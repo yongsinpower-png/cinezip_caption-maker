@@ -268,9 +268,15 @@ _MODEL_FALLBACK = {
     "gemini-pro-latest": "gemini-2.5-flash",
 }
 
+# 혼잡이 확인된 모델을 일정 시간 기억해서, 이후 요청은 재시도 없이
+# 곧바로 안정 모델로 직행 (서버가 살아있는 동안 유지되는 서킷 브레이커)
+_MODEL_COOLDOWN: dict = {}
+_COOLDOWN_SEC = 600  # 10분
+
 
 def _generate_content_resilient(client, model, contents, config=None, progress=None):
-    """지수 백오프 재시도 후에도 계속 과부하/타임아웃이면, 안정적인 구버전 모델로 한 번 더 시도."""
+    """혼잡한 모델은 짧게만 시도하고 안정 모델로 빠르게 전환. 혼잡 이력은 10분간 기억."""
+    import time
     import httpx
     from google.genai import errors as genai_errors
 
@@ -280,15 +286,27 @@ def _generate_content_resilient(client, model, contents, config=None, progress=N
             kwargs["config"] = config
         return client.models.generate_content(**kwargs)
 
+    fallback = _MODEL_FALLBACK.get(model)
+
+    # 최근 혼잡했던 모델이면 시간 낭비 없이 안정 모델로 바로 진행
+    if fallback and time.time() < _MODEL_COOLDOWN.get(model, 0):
+        if progress:
+            progress(f"🚀 {model}이 최근 혼잡해서 안정적인 {fallback} 모델로 바로 진행합니다.")
+        return _with_gemini_retry(lambda: call(fallback), progress=progress, max_attempts=3)
+
     try:
-        return _with_gemini_retry(lambda: call(model), progress=progress)
-    except (genai_errors.ServerError, httpx.HTTPError):
-        fallback = _MODEL_FALLBACK.get(model)
+        # 1차 모델은 딱 1번만 시도하고, 실패하면 재시도 없이 즉시 안정 모델로 전환
+        return _with_gemini_retry(lambda: call(model), progress=progress, max_attempts=1)
+    except (genai_errors.APIError, httpx.HTTPError):
         if not fallback:
             raise
+        _MODEL_COOLDOWN[model] = time.time() + _COOLDOWN_SEC
         if progress:
-            progress(f"⚠️ {model} 모델이 계속 혼잡해서 안정적인 {fallback} 모델로 전환합니다...")
-        return _with_gemini_retry(lambda: call(fallback), progress=progress, max_attempts=2)
+            progress(
+                f"⚠️ {model} 모델이 혼잡해서 안정적인 {fallback} 모델로 전환합니다. "
+                f"(앞으로 10분간은 바로 {fallback}로 진행)"
+            )
+        return _with_gemini_retry(lambda: call(fallback), progress=progress, max_attempts=3)
 
 
 def _gemini_media_part(client, media_path: str, mime_type: str, progress=None):
